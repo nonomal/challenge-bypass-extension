@@ -1,14 +1,14 @@
 import {
-    handleBeforeRequest,
-    handleBeforeSendHeaders,
-    handleHeadersReceived,
-} from './listeners/webRequestListener';
-import {
     handleActivated,
     handleCreated,
     handleRemoved,
     handleReplaced,
 } from './listeners/tabListener';
+import {
+    handleBeforeRequest,
+    handleBeforeSendHeaders,
+    handleHeadersReceived,
+} from './listeners/webRequestListener';
 
 import { Tab } from './tab';
 
@@ -21,8 +21,27 @@ declare global {
     }
 }
 
+declare let browser: unknown;
+
 window.ACTIVE_TAB_ID = chrome.tabs.TAB_ID_NONE;
 window.TABS = new Map<number, Tab>();
+
+const BROWSERS = {
+    CHROME: 'Chrome',
+    FIREFOX: 'Firefox',
+    EDGE: 'Edge',
+} as const;
+type BROWSERS = typeof BROWSERS[keyof typeof BROWSERS];
+
+function getBrowser(): BROWSERS {
+    if (typeof chrome !== 'undefined') {
+        if (typeof browser !== 'undefined') {
+            return BROWSERS.FIREFOX;
+        }
+        return BROWSERS.CHROME;
+    }
+    return BROWSERS.EDGE;
+}
 
 /* Listeners for navigator */
 
@@ -57,10 +76,14 @@ chrome.webRequest.onBeforeRequest.addListener(handleBeforeRequest, { urls: ['<al
     'blocking',
 ]);
 
+const extraInfos = ['requestHeaders', 'blocking'];
+if (getBrowser() === BROWSERS.CHROME) {
+    extraInfos.push('extraHeaders');
+}
 chrome.webRequest.onBeforeSendHeaders.addListener(
     handleBeforeSendHeaders,
     { urls: ['<all_urls>'] },
-    ['requestHeaders', 'blocking'],
+    extraInfos,
 );
 
 chrome.webRequest.onHeadersReceived.addListener(handleHeadersReceived, { urls: ['<all_urls>'] }, [
@@ -90,11 +113,13 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 // TODO It's better to move this to the provider class. Let's figure out how to do it later.
 // Removes cookies for captcha.website to enable getting more tokens in the future.
 chrome.cookies.onChanged.addListener((changeInfo) => {
+    const cloudflareDomains = ['captcha.website', 'issuance.privacypass.cloudflare.com'];
+    const domain = changeInfo.cookie.domain.replace(/^\./, '');
     if (
         !changeInfo.removed &&
-        changeInfo.cookie.domain === '.captcha.website' &&
+        cloudflareDomains.includes(domain) &&
         changeInfo.cookie.name === 'cf_clearance'
     ) {
-        chrome.cookies.remove({ url: 'https://captcha.website', name: 'cf_clearance' });
+        chrome.cookies.remove({ url: `https://${domain}`, name: 'cf_clearance' });
     }
 });
